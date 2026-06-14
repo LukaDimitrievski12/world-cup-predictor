@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { motion, animate, useMotionValue, useTransform } from "framer-motion"
-import { getSimulation, SimulationRow } from "@/lib/api"
+import { getSimulation, getTeams, SimulationRow } from "@/lib/api"
 import Flag from "@/components/Flag"
+import { useTournament } from "@/context/TournamentContext"
+import { runMonteCarlo } from "@/lib/monte-carlo"
 
 const STAGES = ["group_stage", "round_of_32", "round_of_16", "quarterfinal", "semifinal", "final", "winner"] as const
 const LABELS: Record<string, string> = {
@@ -43,16 +45,47 @@ function Spinner() {
 }
 
 export default function TournamentPage() {
-  const [data, setData] = useState<SimulationRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  const { mode, matches, hasLiveData } = useTournament()
 
+  const [staticData, setStaticData]   = useState<SimulationRow[]>([])
+  const [liveData,   setLiveData]     = useState<SimulationRow[] | null>(null)
+  const [eloMap,     setEloMap]       = useState<Record<string, number>>({})
+  const [simulating, setSimulating]   = useState(false)
+  const [loading,    setLoading]      = useState(true)
+  const [error,      setError]        = useState(false)
+
+  // Load static pre-computed data and Elo map once
   useEffect(() => {
-    getSimulation().then(setData).catch(() => setError(true)).finally(() => setLoading(false))
+    Promise.all([
+      getSimulation(),
+      getTeams(),
+    ]).then(([sim, teams]) => {
+      setStaticData(sim)
+      const map: Record<string, number> = {}
+      teams.forEach(t => { map[t.team] = t.elo })
+      setEloMap(map)
+    }).catch(() => setError(true)).finally(() => setLoading(false))
   }, [])
 
-  const sorted = [...data].sort((a, b) => b.winner - a.winner)
-  const top5 = sorted.slice(0, 5)
+  // Re-run Monte Carlo whenever live matches update (or mode switches to live)
+  useEffect(() => {
+    if (mode !== "live" || !hasLiveData || Object.keys(eloMap).length === 0) {
+      if (mode !== "live") setLiveData(null)
+      return
+    }
+    setSimulating(true)
+    const id = setTimeout(() => {
+      setLiveData(runMonteCarlo(matches, eloMap))
+      setSimulating(false)
+    }, 0)
+    return () => clearTimeout(id)
+  }, [mode, matches, hasLiveData, eloMap])
+
+  const isLive     = mode === "live"
+  const data: SimulationRow[] = isLive && liveData ? liveData : staticData
+  const sorted     = [...data].sort((a, b) => b.winner - a.winner)
+  const top5       = sorted.slice(0, 5)
+  const finishedGroupCount = matches.filter(m => m.group && m.status === "finished").length
 
   if (loading) return <Spinner />
   if (error) return (
@@ -82,9 +115,27 @@ export default function TournamentPage() {
           Who Will Lift<br />
           <span className="shimmer-text">The Trophy?</span>
         </h1>
-        <p className="text-slate-500 text-sm max-w-md">
-          10,000 Monte Carlo simulations · Calibrated XGBoost + Logistic Regression · 48 nations competing
-        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="text-slate-500 text-sm">
+            {isLive && liveData
+              ? `1,000 simulations · Based on ${finishedGroupCount} real group result${finishedGroupCount !== 1 ? "s" : ""} so far`
+              : "10,000 Monte Carlo simulations · Calibrated XGBoost + Logistic Regression · 48 nations competing"}
+          </p>
+          {isLive && (
+            <span className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${
+              liveData
+                ? "bg-green-100 text-green-700 border border-green-200"
+                : "bg-amber-100 text-amber-700 border border-amber-200"
+            }`}>
+              {simulating
+                ? <><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> Simulating…</>
+                : liveData
+                ? <><span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Live sim</>
+                : <>Waiting for live data</>
+              }
+            </span>
+          )}
+        </div>
         <div className="gradient-divider mt-8" />
       </motion.section>
 
@@ -94,7 +145,7 @@ export default function TournamentPage() {
           const isTop = i === 0
           return (
             <motion.div
-              key={team.team}
+              key={team.team + (isLive ? "-live" : "-sim")}
               initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 + i * 0.08, duration: 0.45, ease: EASE }}
@@ -156,7 +207,11 @@ export default function TournamentPage() {
       >
         <div className="px-6 py-5 border-b border-slate-100">
           <h2 className="text-lg font-bold text-slate-900 tracking-tight">Advancement Probabilities</h2>
-          <p className="text-xs text-slate-600 mt-0.5">All 48 nations · Sorted by championship probability</p>
+          <p className="text-xs text-slate-600 mt-0.5">
+            {isLive && liveData
+              ? `All 48 nations · ${finishedGroupCount} real results locked in · 1,000 simulations of remaining matches`
+              : "All 48 nations · Sorted by championship probability"}
+          </p>
         </div>
 
         <div className="overflow-x-auto">
