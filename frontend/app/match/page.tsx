@@ -1,11 +1,103 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence, animate, useMotionValue, useTransform } from "framer-motion"
 import { getTeams, predictMatch, PredictResult } from "@/lib/api"
 import Flag from "@/components/Flag"
 
 const EASE = [0.23, 1, 0.32, 1] as const
+
+// ── Searchable country combobox ──────────────────────────────────────────────
+
+function TeamSearch({
+  label, value, teams, onChange,
+}: { label: string; value: string; teams: string[]; onChange: (t: string) => void }) {
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", handle)
+    return () => document.removeEventListener("mousedown", handle)
+  }, [])
+
+  const filtered = query.trim()
+    ? teams.filter(t => t.toLowerCase().includes(query.toLowerCase()))
+    : teams
+
+  function select(t: string) {
+    onChange(t)
+    setQuery("")
+    setOpen(false)
+    inputRef.current?.blur()
+  }
+
+  function handleKey(e: React.KeyboardEvent) {
+    if (e.key === "Escape") { setOpen(false); setQuery("") }
+    if (e.key === "Enter" && filtered.length > 0) select(filtered[0])
+  }
+
+  return (
+    <div ref={ref} className="relative space-y-2">
+      <label className="text-xs font-black text-slate-600 uppercase tracking-[0.15em] block">{label}</label>
+      <div className="relative">
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
+          <Flag team={value} size="sm" />
+        </div>
+        <input
+          ref={inputRef}
+          type="text"
+          value={open ? query : value}
+          placeholder={open ? "Type to search…" : value}
+          onFocus={() => { setQuery(""); setOpen(true) }}
+          onChange={e => { setQuery(e.target.value); setOpen(true) }}
+          onKeyDown={handleKey}
+          className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-800
+            focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all cursor-pointer"
+          autoComplete="off"
+        />
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+          {open ? "▲" : "▼"}
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scaleY: 0.95 }}
+            animate={{ opacity: 1, y: 0, scaleY: 1 }}
+            exit={{ opacity: 0, y: -4, scaleY: 0.95 }}
+            transition={{ duration: 0.12 }}
+            style={{ transformOrigin: "top" }}
+            className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+          >
+            <div className="max-h-52 overflow-y-auto overscroll-contain">
+              {filtered.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-slate-400 text-center">No country found</div>
+              ) : filtered.map(t => (
+                <button
+                  key={t}
+                  onMouseDown={e => { e.preventDefault(); select(t) }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors
+                    ${t === value ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}
+                >
+                  <Flag team={t} size="sm" />
+                  {t}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Animated percentage bar ──────────────────────────────────────────────────
 
 function AnimatedPct({ value, delay = 0 }: { value: number; delay?: number }) {
   const mv = useMotionValue(0)
@@ -20,14 +112,10 @@ function AnimatedPct({ value, delay = 0 }: { value: number; delay?: number }) {
 
 function ProbBar({
   label, team, value, gradient, isWinner = false, delay = 0,
-}: {
-  label: string; team?: string; value: number; gradient: string; isWinner?: boolean; delay?: number
-}) {
+}: { label: string; team?: string; value: number; gradient: string; isWinner?: boolean; delay?: number }) {
   return (
     <div className={`rounded-xl border p-4 transition-all duration-200 ${
-      isWinner
-        ? "border-blue-300 bg-blue-50 shadow-md shadow-blue-100"
-        : "border-slate-200 bg-white"
+      isWinner ? "border-blue-300 bg-blue-50 shadow-md shadow-blue-100" : "border-slate-200 bg-white"
     }`}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -51,6 +139,8 @@ function ProbBar({
   )
 }
 
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function MatchPage() {
   const [teamNames, setTeamNames] = useState<string[]>([])
   const [home, setHome] = useState("Argentina")
@@ -59,18 +149,30 @@ export default function MatchPage() {
   const [weight, setWeight] = useState(1.0)
   const [result, setResult] = useState<PredictResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [fetching, setFetching] = useState(true)
 
   useEffect(() => {
-    getTeams().then(t => setTeamNames(t.map(x => x.team))).catch(console.error).finally(() => setFetching(false))
+    getTeams()
+      .then(t => setTeamNames(t.map(x => x.team)))
+      .catch(() => setError("Could not load team list — is the API running?"))
+      .finally(() => setFetching(false))
   }, [])
+
+  function handleHomeChange(v: string) { setHome(v); setResult(null); setError(null) }
+  function handleAwayChange(v: string) { setAway(v); setResult(null); setError(null) }
 
   async function predict() {
     if (home === away) return
-    setLoading(true); setResult(null)
-    try { setResult(await predictMatch(home, away, neutral, weight)) }
-    catch (e) { console.error(e) }
-    finally { setLoading(false) }
+    setLoading(true); setResult(null); setError(null)
+    try {
+      setResult(await predictMatch(home, away, neutral, weight))
+    } catch (e) {
+      setError("Prediction failed — the API may be starting up, try again in a moment.")
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (fetching) return (
@@ -104,27 +206,8 @@ export default function MatchPage() {
         className="card rounded-2xl p-6 space-y-5"
       >
         <div className="grid grid-cols-2 gap-4">
-          {([
-            { label: "Home Nation", value: home, set: (v: string) => { setHome(v); setResult(null) } },
-            { label: "Away Nation", value: away, set: (v: string) => { setAway(v); setResult(null) } },
-          ] as const).map(({ label, value, set }) => (
-            <div key={label} className="space-y-2">
-              <label className="text-xs font-black text-slate-600 uppercase tracking-[0.15em]">{label}</label>
-              <div className="relative">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                  <Flag team={value} size="sm" />
-                </div>
-                <select
-                  value={value}
-                  onChange={e => set(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-800
-                    focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 cursor-pointer transition-all"
-                >
-                  {teamNames.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-            </div>
-          ))}
+          <TeamSearch label="Home Nation" value={home} teams={teamNames} onChange={handleHomeChange} />
+          <TeamSearch label="Away Nation" value={away} teams={teamNames} onChange={handleAwayChange} />
         </div>
 
         {home !== away ? (
@@ -154,12 +237,24 @@ export default function MatchPage() {
           </div>
         </div>
 
+        {error && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-center">
+            {error}
+          </div>
+        )}
+
         <button
           onClick={predict}
           disabled={loading || home === away}
           className="btn-primary w-full py-3"
         >
-          {loading ? "Calculating…" : "Predict Match"}
+          {loading
+            ? <span className="flex items-center justify-center gap-2">
+                <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                Calculating…
+              </span>
+            : "Predict Match"
+          }
         </button>
       </motion.div>
 
@@ -189,11 +284,13 @@ export default function MatchPage() {
             <ProbBar label={`${result.away_team} Win`} team={result.away_team} value={result.away_win}
               gradient="linear-gradient(90deg, #10b981, #34d399)" isWinner={winner === "away"} delay={0.19} />
 
-            <div className="text-center text-xs text-slate-600 mt-3">
-              Elo — {result.home_team}: {result.home_elo} · {result.away_team}: {result.away_elo}
-              <span className="ml-2">
-                (Δ {result.home_elo > result.away_elo ? "+" : ""}{result.home_elo - result.away_elo})
-              </span>
+            <div className="text-center text-xs text-slate-500 mt-3 space-x-3">
+              <span>Elo — {result.home_team}: {result.home_elo} · {result.away_team}: {result.away_elo}</span>
+              <span className="text-slate-300">|</span>
+              <span>(Δ {result.home_elo > result.away_elo ? "+" : ""}{result.home_elo - result.away_elo})</span>
+              {result.method === "elo" && (
+                <span className="ml-2 text-amber-600 font-semibold">· Elo estimate</span>
+              )}
             </div>
           </motion.div>
         )}

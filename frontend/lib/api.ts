@@ -38,6 +38,7 @@ export interface PredictResult {
   away_win: number
   home_elo: number
   away_elo: number
+  method?: "ml" | "elo"
 }
 
 export async function getSimulation(): Promise<SimulationRow[]> {

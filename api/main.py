@@ -103,12 +103,45 @@ class MatchRequest(BaseModel):
     tournament_weight: float = 1.0
 
 
+def _get_elo(name: str) -> float:
+    if _profiles is None:
+        return 1350.0
+    row = _profiles[_profiles["team"] == name]
+    return float(row.iloc[0].get("elo", 1350)) if not row.empty else 1350.0
+
+
+def _elo_predict(home: str, away: str, is_neutral: bool) -> dict:
+    """Elo-based fallback when the ML model isn't available."""
+    home_elo = _get_elo(home)
+    away_elo = _get_elo(away)
+    advantage = 0.0 if is_neutral else 50.0
+    diff = (home_elo + advantage) - away_elo
+    p_home = 1 / (1 + 10 ** (-diff / 400))
+    p_away = 1 - p_home
+    # Draw probability peaks near 0 elo diff (~28%), shrinks for big mismatches
+    draw = max(0.08, 0.28 - abs(diff) * 0.00035)
+    p_home -= draw * 0.5
+    p_away -= draw * 0.5
+    total = p_home + draw + p_away
+    return {
+        "home_team": home, "away_team": away,
+        "home_win": round(p_home / total, 4),
+        "draw":     round(draw   / total, 4),
+        "away_win": round(p_away / total, 4),
+        "home_elo": round(home_elo),
+        "away_elo": round(away_elo),
+        "method":   "elo",
+    }
+
+
 @app.post("/api/predict")
 async def predict_match(body: MatchRequest) -> dict:
-    if _model is None or _profiles is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
     if body.home_team == body.away_team:
         raise HTTPException(status_code=400, detail="Teams must be different")
+
+    # Fall back to Elo prediction if ML model isn't loaded
+    if _model is None or _profiles is None:
+        return _elo_predict(body.home_team, body.away_team, body.is_neutral)
 
     from src.simulation.monte_carlo import TeamProfile, predict_match_proba
 
@@ -135,11 +168,11 @@ async def predict_match(body: MatchRequest) -> dict:
     p_away, p_draw, p_home = float(proba[0]), float(proba[1]), float(proba[2])
 
     return {
-        "home_team": body.home_team,
-        "away_team": body.away_team,
+        "home_team": body.home_team, "away_team": body.away_team,
         "home_win": round(p_home, 4),
-        "draw": round(p_draw, 4),
+        "draw":     round(p_draw, 4),
         "away_win": round(p_away, 4),
         "home_elo": round(hp.elo),
         "away_elo": round(ap.elo),
+        "method":   "ml",
     }
