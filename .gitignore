@@ -11,8 +11,6 @@ build/
 
 # Data & model files (large — keep out of git)
 data/raw/
-data/processed/
-results/models/
 *.pkl
 *.joblib
 *.h5

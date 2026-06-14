@@ -1,0 +1,8 @@
+model,accuracy,log_loss,brier_score,f1_macro,precision_weighted,recall_weighted
+logistic_regression_cal,0.6048,0.8543,0.5044,0.4603,0.5562,0.6048
+random_forest_cal,0.6045,0.8632,0.5083,0.4469,0.566,0.6045
+xgboost_cal,0.6062,0.867,0.5108,0.4448,0.4642,0.6062
+logistic_regression,0.6,0.87,0.5117,0.4485,0.5838,0.6
+random_forest,0.602,0.8808,0.5168,0.4415,0.4606,0.602
+xgboost,0.5941,0.885,0.5197,0.4526,0.5297,0.5941
+logistic_regression_cal,0.5986,0.8905,0.5169,0.4513,0.5448,0.5986
