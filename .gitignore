@@ -1,0 +1,35 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data & model files (large — keep out of git)
+data/raw/
+data/processed/
+results/models/
+*.pkl
+*.joblib
+*.h5
+
+# Notebooks checkpoints
+notebooks/.ipynb_checkpoints/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Next.js
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
