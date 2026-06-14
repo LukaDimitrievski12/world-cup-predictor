@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { getTeams, TeamProfile } from "@/lib/api"
 import Flag from "@/components/Flag"
@@ -351,10 +351,12 @@ export default function BracketPage() {
   const { mode, matches, groupStandings, hasLiveData, isLoading } = useTournament()
   const isLiveMode = mode === "live"
 
-  const [bracket, setBracket]     = useState<Record<Round, Match[]>>(makeInitialBracket)
-  const [eloMap, setEloMap]       = useState<Record<string, number>>({})
+  const [bracket, setBracket]       = useState<Record<Round, Match[]>>(makeInitialBracket)
+  const [eloMap, setEloMap]         = useState<Record<string, number>>({})
   const [fromGroups, setFromGroups] = useState(false)
-  const [fromLive, setFromLive]   = useState(false)
+  const [fromLive, setFromLive]     = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const captureRef = useRef<HTMLDivElement>(null)
 
   // Seed R32 from user's group-stage predictions (localStorage)
   useEffect(() => {
@@ -453,6 +455,34 @@ export default function BracketPage() {
     [matches]
   )
 
+  async function downloadBracket() {
+    if (!captureRef.current || downloading) return
+    setDownloading(true)
+    try {
+      const { default: html2canvas } = await import("html2canvas")
+      const el = captureRef.current
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: "#e8edf8",
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: el.scrollWidth,
+        width: el.scrollWidth,
+        height: el.scrollHeight,
+      })
+      const link = document.createElement("a")
+      link.download = "wc2026-bracket.png"
+      link.href = canvas.toDataURL("image/png")
+      link.click()
+    } catch (e) {
+      console.error("Screenshot failed:", e)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const leftR32  = bracket.r32.slice(0, 8)
   const rightR32 = bracket.r32.slice(8)
   const leftR16  = bracket.r16.slice(0, 4)
@@ -461,7 +491,7 @@ export default function BracketPage() {
   const rightQF  = bracket.qf.slice(2)
 
   return (
-    <div className="space-y-6">
+    <div ref={captureRef} className="space-y-6" style={{ padding: "0 0 8px 0" }}>
 
       {/* Hero */}
       <motion.div
@@ -480,9 +510,21 @@ export default function BracketPage() {
               : "Click a team to advance them. Win probabilities from our ML model."}
           </p>
         </div>
-        <button onClick={resetBracket} className="text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors px-3 py-1.5 rounded-lg hover:bg-slate-100">
-          Reset ↺
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={downloadBracket}
+            disabled={downloading}
+            className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors px-3 py-1.5 rounded-lg hover:bg-blue-50 border border-blue-200 hover:border-blue-300 disabled:opacity-50"
+          >
+            {downloading
+              ? <><span className="w-3 h-3 rounded-full border-2 border-blue-300 border-t-blue-600 animate-spin" /> Saving…</>
+              : <>↓ Share</>
+            }
+          </button>
+          <button onClick={resetBracket} className="text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors px-3 py-1.5 rounded-lg hover:bg-slate-100">
+            Reset ↺
+          </button>
+        </div>
       </motion.div>
 
       <div className="gradient-divider" />
